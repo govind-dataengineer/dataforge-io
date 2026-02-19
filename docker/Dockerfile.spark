@@ -1,0 +1,29 @@
+ARG SPARK_BASE_IMAGE=docker.io/bitnami/spark:3.5.0-arm64
+
+FROM ${SPARK_BASE_IMAGE}
+
+USER root
+
+# Install Python packages needed for Delta Lake and libraries
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PySpark dependencies
+RUN pip install --no-cache-dir \
+    delta-spark==3.0.0 \
+    pydantic>=2.0 \
+    pyyaml \
+    python-dotenv \
+    requests
+
+# Create app directories
+RUN mkdir -p /opt/spark-apps /opt/dataforge_core
+
+COPY spark_jobs /opt/spark-apps
+COPY dataforge_core /opt/dataforge_core
+
+WORKDIR /opt/spark-apps
+
+USER 1001

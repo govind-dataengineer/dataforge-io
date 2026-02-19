@@ -1,0 +1,33 @@
+# dbt Tests for DataForge Models
+
+- name: fct_orders
+  columns:
+    - name: order_id
+      description: "Unique order identifier"
+      tests:
+        - unique
+        - not_null
+
+    - name: customer_id
+      description: "Customer identifier"
+      tests:
+        - not_null
+
+    - name: order_amount
+      description: "Order amount in USD"
+      tests:
+        - not_null
+        - positive_values
+
+    - name: order_status
+      description: "Order processing status"
+      tests:
+        - accepted_values:
+            values: ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled']
+
+- name: daily_order_summary
+  tests:
+    - dbt_utils.recency:
+        timestamp_field: "created_at"
+        datepart: "day"
+        interval: 1

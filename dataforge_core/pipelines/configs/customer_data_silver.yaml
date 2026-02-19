@@ -1,0 +1,79 @@
+# Example: Customer Data Silver Layer Pipeline
+# Cleans and standardizes customer data from Bronze
+
+name: customer_data_silver
+version: "1.0.0"
+description: "Silver layer transformation for customer master data"
+owner: data-platform-team
+
+mode: batch
+schedule: "0 3 * * *"  # 3 AM daily (after bronze load)
+timeout_minutes: 60
+retry_count: 2
+
+source:
+  type: delta
+  path: s3://dataforge-bronze/ecommerce/customers/
+  format: delta
+
+transformations:
+  - name: "flatten_address"
+    type: "sql"
+    input_tables: ["bronze_customers"]
+    output_table: "flattened"
+    sql_query: |
+      SELECT
+        customer_id,
+        lower(trim(first_name)) as first_name,
+        lower(trim(last_name)) as last_name,
+        lower(trim(email)) as email,
+        trim(address) as address,
+        trim(city) as city,
+        upper(trim(state)) as state,
+        trim(zip_code) as zip_code,
+        created_at,
+        updated_at
+      FROM bronze_customers
+      WHERE customer_id IS NOT NULL
+  
+  - name: "deduplicate"
+    type: "sql"
+    input_tables: ["flattened"]
+    output_table: "deduplicated"
+    sql_query: |
+      SELECT * FROM (
+        SELECT *,
+          ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY updated_at DESC) as rn
+        FROM flattened
+      )
+      WHERE rn = 1
+
+target:
+  layer: silver
+  table_name: customers_cleaned
+  path: s3://dataforge-silver/ecommerce/customers/
+  format: delta
+  mode: overwrite
+  partition_by: ["state"]
+
+quality_rules:
+  - name: "completed_records"
+    type: "custom"
+    sql_check: |
+      SELECT COUNT(*) as invalid_count FROM temp_table
+      WHERE first_name IS NULL OR email IS NULL
+    enabled: true
+  
+  - name: "data_consistency"
+    type: "custom"
+    sql_check: |
+      SELECT COUNT(*) as invalid_count FROM temp_table
+      WHERE char_length(zip_code) != 5
+    enabled: true
+
+quality_threshold: 0.98
+
+tags:
+  - customers
+  - silver-layer
+  - master-data

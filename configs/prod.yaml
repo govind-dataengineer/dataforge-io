@@ -1,0 +1,130 @@
+# DataForge Production Configuration
+# High-availability, cost-optimized production environment
+
+environment: prod
+
+# Cloud Storage Configuration
+cloud:
+  storage_type: adls2  # Azure Data Lake Storage Gen2
+  endpoint: https://${STORAGE_ACCOUNT}.dfs.core.windows.net
+  storage_account: ${STORAGE_ACCOUNT}
+  access_key: ${STORAGE_KEY}
+  use_ssl: true
+
+# Lakehouse Configuration
+lakehouse:
+  bronze_path: abfss://bronze@${STORAGE_ACCOUNT}.dfs.core.windows.net/
+  silver_path: abfss://silver@${STORAGE_ACCOUNT}.dfs.core.windows.net/
+  gold_path: abfss://gold@${STORAGE_ACCOUNT}.dfs.core.windows.net/
+  
+  delta:
+    enable_cdc: true
+    enable_deletion_vectors: true
+    auto_compact_interval: 21600  # 6 hours
+    partition_overwrite_mode: static
+
+# Spark Configuration (Azure Databricks)
+spark:
+  master_url: https://${DATABRICKS_WORKSPACE}.cloud.databricks.com
+  app_name: DataForge-Production
+  cluster_name: dataforge-prod-cluster
+  
+  configs:
+    spark.sql.extensions: io.delta.sql.DeltaSparkSessionExtension
+    spark.sql.catalog.spark_catalog: org.apache.spark.sql.delta.catalog.DeltaCatalog
+    spark.sql.shuffle.partitions: 128
+    spark.driver.memory: 4g
+    spark.executor.memory: 8g
+    spark.executor.cores: 8
+    spark.sql.adaptive.enabled: true
+    spark.dynamicAllocation.enabled: true
+    spark.dynamicAllocation.minExecutors: 4
+    spark.dynamicAllocation.maxExecutors: 32
+
+# Database Configuration
+database:
+  type: postgresql
+  host: postgres-prod.postgres.database.azure.com
+  port: 5432
+  username: ${DB_USERNAME}
+  password: ${DB_PASSWORD}
+  ssl_enabled: true
+  pool_size: 20
+  databases:
+    metadata: dataforge_metadata_prod
+    audit: dataforge_audit_prod
+    staging: dataforge_staging_prod
+
+# Kafka Configuration (Event Hubs)
+kafka:
+  bootstrap_servers: ${EVENT_HUB_NAMESPACE}.servicebus.windows.net:9092
+  schema_registry_url: http://schema-registry-prod:8081
+  consumer_group: dataforge-prod
+  auto_offset_reset: earliest
+  enable_auto_commit: false
+  replication_factor: 3
+
+# Airflow Configuration (High Availability)
+airflow:
+  base_log_folder: abfss://airflow-logs@${STORAGE_ACCOUNT}.dfs.core.windows.net/
+  dags_folder: /opt/airflow/dags
+  max_active_tasks_per_dag: 32
+  max_active_runs_per_dag: 5
+  default_retry_count: 3
+  default_retry_delay_minutes: 15
+  executor_type: KubernetesExecutor  # Use K8S for prod
+
+# Data Quality & Validation
+data_quality:
+  enable_schema_validation: true
+  enable_data_profiling: true
+  enable_duplicate_check: true
+  enable_null_check: true
+  enable_statistical_profiling: true
+  quality_threshold: 0.99
+
+# Observability & Monitoring
+observability:
+  log_level: INFO
+  enable_structured_logging: true
+  enable_metrics: true
+  metrics_port: 9090
+  enable_lineage_tracking: true
+  enable_data_contracts: true
+  monitoring_tool: datadog  # or prometheus_grafana
+  datadog_api_key: ${DATADOG_API_KEY}
+
+# Processing
+processing:
+  batch:
+    default_parallelism: 128
+    max_partition_bytes: 512mb
+  streaming:
+    checkpoint_location: abfss://checkpoints@${STORAGE_ACCOUNT}.dfs.core.windows.net/
+    micro_batch_interval_seconds: 30
+
+# Notifications
+notifications:
+  enabled: true
+  slack_webhook_url: ${SLACK_WEBHOOK_URL}
+  pagerduty_integration_key: ${PAGERDUTY_KEY}
+  email_recipients:
+    - data-eng-prod@dataforge.io
+    - data-platform-leads@dataforge.io
+
+# Cost Optimization (CRITICAL)
+cost_optimization:
+  enable_partition_pruning: true
+  enable_file_compaction: true
+  file_compaction_interval_hours: 6
+  auto_scaling_enabled: true
+  compression_codec: zstd  # Better compression than snappy
+  enable_spot_instances: true
+  spot_percentage: 80
+
+# High Availability
+high_availability:
+  enable_replication: true
+  backup_retention_days: 30
+  disaster_recovery_enabled: true
+  secondary_region: ${SECONDARY_REGION:-eastus}

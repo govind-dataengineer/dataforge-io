@@ -1,0 +1,28 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /opt/dbt
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install dbt and adapters
+RUN pip install --no-cache-dir \
+    dbt-core==1.7.1 \
+    dbt-postgres==1.7.1 \
+    dbt-spark==1.7.1 \
+    pydantic>=2.0 \
+    pyyaml
+
+# Copy dbt project
+COPY dbt /opt/dbt
+COPY configs /opt/configs
+
+EXPOSE 8080
+
+CMD ["dbt", "--version"]

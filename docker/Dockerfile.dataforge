@@ -1,0 +1,37 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /opt/dataforge_core
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    libpq-dev \
+    curl \
+    openjdk-17-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    pyspark==3.5.0 \
+    delta-spark==3.0.0 \
+    kafka-python==2.0.2 \
+    psycopg2-binary==2.9.9 \
+    pydantic>=2.0 \
+    pyyaml \
+    python-dotenv \
+    prometheus-client==0.19.0 \
+    flask==3.0.0 \
+    requests \
+    pytest \
+    pytest-cov \
+    sqlalchemy==2.0.23
+
+COPY dataforge_core /opt/dataforge_core
+COPY configs /opt/configs
+
+EXPOSE 5000
+
+CMD ["python", "-m", "dataforge_core.api.server"]
