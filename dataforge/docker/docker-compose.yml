@@ -1,0 +1,165 @@
+version: '3.9'
+
+services:
+  # PostgreSQL - Metadata store
+  postgres:
+    image: postgres:15-alpine
+    container_name: dataforge-postgres
+    environment:
+      POSTGRES_USER: dataforge
+      POSTGRES_PASSWORD: dataforge_dev
+      POSTGRES_DB: dataforge_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dataforge"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dataforge-network
+
+  # MinIO - S3-compatible object storage (data lake)
+  minio:
+    image: minio/minio:latest
+    container_name: dataforge-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"      # S3 API
+      - "9001:9001"      # Console
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - dataforge-network
+
+  # Spark Master
+  spark-master:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.spark
+    container_name: dataforge-spark-master
+    environment:
+      SPARK_MODE: master
+      SPARK_RPC_AUTHENTICATION_ENABLED: "no"
+      SPARK_RPC_ENCRYPTION_ENABLED: "no"
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
+      SPARK_SSL_ENABLED: "no"
+    volumes:
+      - ./:/opt/dataforge
+    ports:
+      - "8080:8080"  # Spark UI
+      - "7077:7077"  # Spark Master
+    networks:
+      - dataforge-network
+
+  # Spark Worker
+  spark-worker:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.spark
+    container_name: dataforge-spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_MEMORY: 2G
+      SPARK_WORKER_CORES: 2
+    volumes:
+      - ./:/opt/dataforge
+    ports:
+      - "8081:8081"
+    networks:
+      - dataforge-network
+
+  # Airflow - Orchestration
+  airflow:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.airflow
+    container_name: dataforge-airflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW_HOME: /opt/airflow
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/dataforge/dags
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://dataforge:dataforge_dev@postgres:5432/dataforge_db
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      PYTHONPATH: /opt/dataforge
+    volumes:
+      - ./:/opt/dataforge
+      - airflow_logs:/opt/airflow/logs
+    ports:
+      - "8888:8080"  # Airflow UI
+    networks:
+      - dataforge-network
+    command: >
+      bash -c "
+        airflow db init &&
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@dataforge.io 2>/dev/null || true &&
+        airflow scheduler &
+        airflow webserver --port 8080
+      "
+
+  # FastAPI Service
+  api:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.api
+    container_name: dataforge-api
+    depends_on:
+      - spark-master
+      - postgres
+      - minio
+    environment:
+      PYTHONPATH: /opt/dataforge
+      SPARK_MASTER_URL: spark://spark-master:7077
+    volumes:
+      - ./:/opt/dataforge
+    ports:
+      - "8000:8000"
+    networks:
+      - dataforge-network
+    command: uvicorn dataforge.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Jupyter Notebook - Developer environment
+  jupyter:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.jupyter
+    container_name: dataforge-jupyter
+    depends_on:
+      - spark-master
+      - postgres
+      - minio
+    environment:
+      PYTHONPATH: /opt/dataforge
+      SPARK_MASTER_URL: spark://spark-master:7077
+    volumes:
+      - ./:/opt/dataforge
+    ports:
+      - "8888:8888"
+    networks:
+      - dataforge-network
+    command: jupyter notebook --ip=0.0.0.0 --allow-root --no-browser --NotebookApp.token='' --NotebookApp.password=''
+
+volumes:
+  postgres_data:
+  minio_data:
+  airflow_logs:
+
+networks:
+  dataforge-network:
+    driver: bridge
